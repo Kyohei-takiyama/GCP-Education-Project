@@ -1,0 +1,5 @@
+defaultProject: dotted-transit-434605-u4
+defaultLocation: US
+defaultDataset: dataform
+defaultAssertionDataset: dataform_assertions
+dataformCoreVersion: 3.0.0
