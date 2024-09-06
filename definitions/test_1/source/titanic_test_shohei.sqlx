@@ -1,0 +1,6 @@
+config {
+    type: "declaration",
+    database: "dotted-transit-434605-u4",
+    schema: "education_k",
+    name: "titanic_test_shohei"
+}
