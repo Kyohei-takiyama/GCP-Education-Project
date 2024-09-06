@@ -1,0 +1,25 @@
+main:
+  steps:
+    - init:
+        assign:
+          - project_id: ${sys.get_env("GOOGLE_CLOUD_PROJECT_ID")}
+          - file_path: "gs://from_s3_data_transfer/titanic_data.csv" # ソースとなるファイルのGCS URI
+          - dataset: "education_k" # ターゲットとなるBigQueryのデータセット
+          - table: "titanic_test_shohei_from_wf" # ターゲットとなるBigQueryのテーブル
+    - runLoadJob:
+        call: googleapis.bigquery.v2.jobs.insert
+        args:
+          projectId: ${project_id}
+          body:
+            configuration:
+              jobType: LOAD
+              load:
+                sourceUris: ${file_path}
+                writeDisposition: "WRITE_TRUNCATE"
+                destinationTable:
+                  projectId: ${project_id}
+                  datasetId: ${dataset}
+                  tableId: ${table}
+        result: query_result
+    - the_end:
+        return: ${query_result}
