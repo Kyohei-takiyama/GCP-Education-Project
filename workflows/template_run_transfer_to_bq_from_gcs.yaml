@@ -1,0 +1,169 @@
+main:
+  steps:
+    - init:
+        assign:
+          - project_id: ${sys.get_env("GOOGLE_CLOUD_PROJECT_ID")}
+          - dataset_id: "education_k" # dataset_idといいつつ、実際はdataset_name
+          - table_name: "titanic_test_shohei"
+          - schema: [
+               {name: "PassengerId", type: "INTEGER"},
+                {name: "Pclass", type: "INTEGER"},
+                {name: "Name", type: "STRING"},
+                {name: "Sex", type: "STRING"},
+                {name: "Age", type: "FLOAT"},
+                {name: "SibSp", type: "INTEGER"},
+                {name: "Parch", type: "INTEGER"},
+                {name: "Ticket", type: "STRING"},
+                {name: "Fare", type: "FLOAT"},
+                {name: "Cabin", type: "STRING"},
+                {name: "Embarked", type: "STRING"}
+              ]
+          - backet_name: "from_s3_data_transfer"
+          - workflow_location: ${sys.get_env("GOOGLE_CLOUD_LOCATION")}
+          - workflow_name: run_transfer_to_bq_from_gcs
+          - skipLeadingRows: 1 # CSVの1行目をスキップ
+          - object_name: "titanic_data.csv"
+    - call_table_check:
+        # テーブルが存在するかチェック。存在しない場合は作成
+        call: check_table_status
+        args:
+          project_id: ${project_id}
+          dataset_id: ${dataset_id}
+          table_name: ${table_name}
+          schema: ${schema}
+    - call_common_load_csv_to_bq:
+        # CSVファイルをBigQueryにロード
+        call: call_common_load_csv_to_bq
+        args:
+          bucket_name: ${backet_name}
+          object_name: ${object_name}
+          skipLeadingRows: ${skipLeadingRows}
+          project_id: ${project_id}
+          dataset_id: ${dataset_id}
+          table_name: ${table_name}
+          schema: ${schema}
+
+check_table_status:
+  params: [project_id, dataset_id, table_name, schema]
+  steps:
+    - get_table_status:
+        try:
+          steps:
+          - get_table:
+              call: googleapis.bigquery.v2.tables.get
+              args:
+                projectId: ${project_id}
+                datasetId: ${dataset_id}
+                tableId: ${table_name}
+              result: table_status
+          - output_table_status:
+              call: sys.log
+              args:
+                severity: INFO
+                text: ${table_status}
+        except:
+          steps:
+          - create_table:
+              call: googleapis.bigquery.v2.tables.insert
+              args:
+                projectId: ${project_id}
+                datasetId: ${dataset_id}
+                body:
+                  tableReference:
+                    projectId: ${project_id}
+                    datasetId: ${dataset_id}
+                    tableId: ${table_name}
+                  schema: ${schema}
+              result: create_table_result
+          - output_create_table_result:
+              call: sys.log
+              args:
+                severity: INFO
+                text: ${create_table_result}
+
+call_common_load_csv_to_bq:
+  params: [bucket_name, object_name, skipLeadingRows, project_id, dataset_id, table_name, schema]
+  steps:
+    - assign_val:
+        assign:
+          # gsutil URI
+          - gcs_source_file: ${"gs://" + bucket_name + "/" + object_name}
+    - url_encode:
+        #引数で渡されたオブジェクト名を、APIが読み取れるようエンコードする
+        call: text.url_encode
+        args:
+          source: ${object_name}
+        result: encoded_object_name
+    - start_log:
+        call: sys.log
+        args:
+          severity: INFO
+          text: ${"Start load job for " + object_name}
+    - get_csv_file:
+        #読み込む対象のcsvファイルが存在しているか判別し、ファイルが存在しない場合は終了
+        try:
+          call: googleapis.storage.v1.objects.get
+          args:
+            bucket: ${bucket_name}
+            object: ${encoded_object_name}
+          result: csv_file
+        except:
+          as: e
+          steps:
+            - output_object_error_log:
+                call: sys.log
+                args:
+                  severity: ERROR
+                  text: e.error.message
+            - finish_get_csv_job:
+                raise: ${e}
+    - output_csv_result:
+        # ログ出力
+        call: sys.log
+        args:
+          severity: INFO
+          text: ${csv_file}
+    - load_csv_to_bigquery:
+        # CSVファイルをBigQueryにロード
+        try:
+          call: googleapis.bigquery.v2.jobs.insert
+          args:
+            projectId: ${project_id}
+            body:
+              configuration:
+                load:
+                  destinationTable:
+                    projectId: ${project_id}
+                    datasetId: ${dataset_id}
+                    tableId: ${table_name}
+                  schema:
+                    fields: ${schema}
+                  sourceUris: ${gcs_source_file}
+                  skipLeadingRows: ${skipLeadingRows}
+                  writeDisposition: "WRITE_TRUNCATE"
+                  encoding: UTF-8
+                  sourceFormat: CSV
+                  fieldDelimiter: ","
+                  allowQuotedNewlines: true
+          result: load_result
+        except:
+          as: e
+          steps:
+            - output_load_error_log:
+                call: sys.log
+                args:
+                  severity: ERROR
+                  text: e.error.message
+            - finish_insert_job:
+                raise: ${e}
+    - output_load_result:
+        # ログ出力
+        call: sys.log
+        args:
+          severity: INFO
+          text: ${load_result}
+    - end_log:
+        call: sys.log
+        args:
+          severity: INFO
+          text: ${"End load job for " + object_name}
