@@ -1,0 +1,47 @@
+# 構文：https://cloud.google.com/workflows/docs/reference/syntax
+main:
+  steps:
+    - init:
+        # 引数の初期化
+        # sys.get_env:https://cloud.google.com/workflows/docs/reference/stdlib/sys/get_env
+        assign:
+          - project_id: ${sys.get_env("GOOGLE_CLOUD_PROJECT_ID")}
+          - workflow_location: ${sys.get_env("GOOGLE_CLOUD_LOCATION")}
+          - transferjob_name: "transferJobs/164434055902639234"
+          - workflow_name: "template_run_transfer_to_bq_from_gcs"
+    - run_transfer_to_gcs_from_s3:
+        steps:
+        - start_log:
+            # https://cloud.google.com/workflows/docs/reference/stdlib/sys/log
+            call: sys.log
+            args:
+              severity: INFO
+              text: ${transferjob_name + " ----  Start transfer job"}
+        - run_transfer:
+            # https://cloud.google.com/workflows/docs/reference/googleapis/storagetransfer/Overview
+            # POST :http://xxxxxxx /googlapis/stroatetransfer/v1/transferjoba/run/{transferjob_name}
+            # body{
+            #   projectId: ${sys.get_env("GOOGLE_CLOUD_PROJECT_ID")}
+            # }
+            call: googleapis.storagetransfer.v1.transferJobs.run
+            args:
+              jobName: ${transferjob_name}
+              body:
+                projectId: ${project_id}
+            result: run_transfer_result
+    - call_fetch_next_workflow:
+        call: fetch_next_workflow
+        args:
+            project_id: ${project_id}
+            workflow_location: ${workflow_location}
+            workflow_name: ${workflow_name}
+
+fetch_next_workflow:
+    params: [project_id, workflow_location, workflow_name]
+    steps:
+    - fetch_template_run_transfer_to_bq_from_gcs:
+        call: http.post
+        args:
+            url: ${"https://workflowexecutions.googleapis.com/v1/projects/" + project_id + "/locations/" + workflow_location + "/workflows/" + workflow_name + "/executions"}
+            auth:
+                type: OAuth2
